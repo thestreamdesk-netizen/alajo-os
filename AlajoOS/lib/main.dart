@@ -879,7 +879,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showAddUserScreen(String cardId) async {
+    void _showAddUserScreen(String cardId) async {
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
     final dailyAmountController = TextEditingController(text: '1000');
@@ -943,4 +943,31 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            ElevatedButton
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F5132), foregroundColor: Colors.white),
+              onPressed: () async {
+                if (nameController.text.isEmpty || phoneController.text.isEmpty) {
+                  _showErrorDialog('Name and Phone are required');
+                  return;
+                }
+                Navigator.pop(ctx);
+                final newCustomer = Customer(
+                  cardId: newId,
+                  name: nameController.text,
+                  phone: phoneController.text,
+                  dailyAmount: int.tryParse(dailyAmountController.text)?? 1000,
+                  balance: 0,
+                  lastCollection: 'Never',
+                  photoPath: photoPath,
+                );
+                await DatabaseHelper.instance.addCustomer(newCustomer);
+                _showSuccessDialog('Added ${newCustomer.name} with ID $newId');
+                _showPaymentScreen(newCustomer);
+              },
+              child: const Text('Save User'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
