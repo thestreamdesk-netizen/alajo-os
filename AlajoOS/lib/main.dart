@@ -5,6 +5,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,9 +24,9 @@ class AlajoOsApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0F5132), // Emerald Green
+          seedColor: const Color(0xFF0F5132),
           primary: const Color(0xFF0F5132),
-          secondary: const Color(0xFFD4AF37), // Metallic Gold
+          secondary: const Color(0xFFD4AF37),
           background: const Color(0xFFF8F9FA),
         ),
         cardTheme: const CardThemeData(
@@ -39,7 +41,7 @@ class AlajoOsApp extends StatelessWidget {
 }
 
 // ============================================================================
-// DATABASE HELPER
+// DATABASE HELPER - UPDATED WITH PHOTO
 // ============================================================================
 class Customer {
   final String cardId;
@@ -48,6 +50,7 @@ class Customer {
   final int dailyAmount;
   final int balance;
   final String lastCollection;
+  final String? photoPath; // NEW: For photo
 
   const Customer({
     required this.cardId,
@@ -56,6 +59,7 @@ class Customer {
     required this.dailyAmount,
     required this.balance,
     required this.lastCollection,
+    this.photoPath,
   });
 
   Map<String, dynamic> toMap() {
@@ -66,6 +70,7 @@ class Customer {
       'dailyAmount': dailyAmount,
       'balance': balance,
       'lastCollection': lastCollection,
+      'photoPath': photoPath,
     };
   }
 }
@@ -89,7 +94,7 @@ class Contribution {
 
   Map<String, dynamic> toMap() {
     return {
-      if (id != null) 'id': id,
+      if (id!= null) 'id': id,
       'customerCardId': customerCardId,
       'customerName': customerName,
       'amountPaid': amountPaid,
@@ -106,7 +111,7 @@ class DatabaseHelper {
   DatabaseHelper._init();
 
   Future<Database> get database async {
-    if (_database != null) return _database!;
+    if (_database!= null) return _database!;
     _database = await _initDB('alajo_os.db');
     return _database!;
   }
@@ -117,8 +122,9 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2, // UPGRADED VERSION FOR PHOTO
       onCreate: _createDB,
+      onUpgrade: _upgradeDB,
     );
   }
 
@@ -130,7 +136,8 @@ class DatabaseHelper {
         phone TEXT NOT NULL,
         dailyAmount INTEGER NOT NULL,
         balance INTEGER NOT NULL,
-        lastCollection TEXT NOT NULL
+        lastCollection TEXT NOT NULL,
+        photoPath TEXT
       )
     ''');
 
@@ -149,9 +156,14 @@ class DatabaseHelper {
     await _seedDatabase(db);
   }
 
+  Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE customers ADD COLUMN photoPath TEXT');
+    }
+  }
+
   Future _seedDatabase(Database db) async {
     final now = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
-
     final demoCustomers = [
       const Customer(
         cardId: 'ALAJO-001',
@@ -183,57 +195,29 @@ class DatabaseHelper {
       await db.insert('customers', customer.toMap(),
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
-
-    // Seed some initial contribution history
-    final initialContributions = [
-      Contribution(
-        customerCardId: 'ALAJO-001',
-        customerName: 'Iya Alata (Pepper Seller)',
-        amountPaid: 1000,
-        datePaid: now,
-        notes: 'Daily contribution received',
-      ),
-      Contribution(
-        customerCardId: 'ALAJO-002',
-        customerName: 'Baba Ibadan (Tailor)',
-        amountPaid: 2000,
-        datePaid: now,
-        notes: 'Paid cash',
-      ),
-      Contribution(
-        customerCardId: 'ALAJO-003',
-        customerName: 'Mama Ngozi (Provisions Shop)',
-        amountPaid: 5000,
-        datePaid: now,
-        notes: 'Completed card target',
-      ),
-    ];
-
-    for (var contribution in initialContributions) {
-      await db.insert('contributions', contribution.toMap());
-    }
   }
 
   Future<List<Customer>> getCustomers() async {
     final db = await instance.database;
     final result = await db.query('customers');
     return result
-        .map((json) => Customer(
+       .map((json) => Customer(
               cardId: json['cardId'] as String,
               name: json['name'] as String,
               phone: json['phone'] as String,
               dailyAmount: json['dailyAmount'] as int,
               balance: json['balance'] as int,
               lastCollection: json['lastCollection'] as String,
+              photoPath: json['photoPath'] as String?,
             ))
-        .toList();
+       .toList();
   }
 
   Future<Customer?> getCustomerByCardId(String cardId) async {
     final db = await instance.database;
     final result = await db.query(
       'customers',
-      where: 'cardId = ?',
+      where: 'cardId =?',
       whereArgs: [cardId],
     );
     if (result.isNotEmpty) {
@@ -245,24 +229,23 @@ class DatabaseHelper {
         dailyAmount: json['dailyAmount'] as int,
         balance: json['balance'] as int,
         lastCollection: json['lastCollection'] as String,
+        photoPath: json['photoPath'] as String?,
       );
     }
     return null;
   }
 
-  Future<List<Contribution>> getContributions() async {
+  Future<void> addCustomer(Customer customer) async {
     final db = await instance.database;
-    final result = await db.query('contributions', orderBy: 'id DESC');
-    return result
-        .map((json) => Contribution(
-              id: json['id'] as int?,
-              customerCardId: json['customerCardId'] as String,
-              customerName: json['customerName'] as String,
-              amountPaid: json['amountPaid'] as int,
-              datePaid: json['datePaid'] as String,
-              notes: json['notes'] as String,
-            ))
-        .toList();
+    await db.insert('customers', customer.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String> generateNewCardId() async {
+    final db = await instance.database;
+    final result = await db.rawQuery('SELECT COUNT(*) as count FROM customers');
+    int count = Sqflite.firstIntValue(result)?? 0;
+    return 'ALJ${(count + 1).toString().padLeft(3, '0')}';
   }
 
   Future<void> addCollection(String cardId, int amount, String notes) async {
@@ -273,18 +256,16 @@ class DatabaseHelper {
     final nowStr = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
     final newBalance = customer.balance + amount;
 
-    // Update customer balance and last collection time
     await db.update(
       'customers',
       {
         'balance': newBalance,
         'lastCollection': 'Just now',
       },
-      where: 'cardId = ?',
+      where: 'cardId =?',
       whereArgs: [cardId],
     );
 
-    // Insert history record
     await db.insert(
         'contributions',
         Contribution(
@@ -296,6 +277,21 @@ class DatabaseHelper {
         ).toMap());
   }
 
+  Future<List<Contribution>> getContributions() async {
+    final db = await instance.database;
+    final result = await db.query('contributions', orderBy: 'id DESC');
+    return result
+       .map((json) => Contribution(
+              id: json['id'] as int?,
+              customerCardId: json['customerCardId'] as String,
+              customerName: json['customerName'] as String,
+              amountPaid: json['amountPaid'] as int,
+              datePaid: json['datePaid'] as String,
+              notes: json['notes'] as String,
+            ))
+       .toList();
+  }
+
   Future<void> resetDemoDatabase() async {
     final db = await instance.database;
     await db.delete('contributions');
@@ -305,7 +301,7 @@ class DatabaseHelper {
 }
 
 // ============================================================================
-// HOME SCREEN
+// HOME SCREEN - UPDATED WITH VOICE FIX
 // ============================================================================
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -317,10 +313,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _isListening = false;
-  String _speechText = "Tap mic and say 'Collect [amount] for [Customer]'";
-
-  final currencyFormat =
-      NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 0);
+  String _speechText = "Tap mic and say amount";
+  final currencyFormat = NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 0);
 
   @override
   void initState() {
@@ -332,155 +326,38 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await _speech.initialize();
     } catch (e) {
-      // Speech recognition not supported or permission denied
+      print('Speech error: $e');
     }
   }
 
-  void _startListening() async {
+  void _startListening(TextEditingController amountController) async {
     bool available = await _speech.initialize(
       onError: (val) => print('Speech Error: $val'),
       onStatus: (val) => print('Speech Status: $val'),
     );
     if (available) {
-      setState(() {
-        _isListening = true;
-        _speechText = "Listening in Yoruba/Pidgin...";
-      });
+      setState(() => _isListening = true);
       _speech.listen(
         onResult: (val) {
           setState(() {
             _speechText = val.recognizedWords;
+            // Extract numbers from speech
+            String numbers = val.recognizedWords.replaceAll(RegExp(r'[^0-9]'), '');
+            if (numbers.isNotEmpty) {
+              amountController.text = numbers;
+            }
           });
           if (val.finalResult) {
-            _parseVoiceCommand(val.recognizedWords);
+            setState(() => _isListening = false);
           }
         },
       );
-    } else {
-      setState(() {
-        _isListening = false;
-        _speechText = "Speech recognition unavailable.";
-      });
     }
   }
 
   void _stopListening() async {
     await _speech.stop();
     setState(() => _isListening = false);
-  }
-
-  // Parses voice strings (e.g. Pidgin: "Collect five k for Iya Alata" or Yoruba: "Gba egberun fun Iya Alata")
-  void _parseVoiceCommand(String text) async {
-    final cleanText = text.toLowerCase();
-
-    // Find customer keyword matches
-    String? matchedCardId;
-    String matchedName = "";
-    int amount = 1000; // default collection
-    String notes = "Voice Input";
-
-    if (cleanText.contains('iya alata') ||
-        cleanText.contains('alata') ||
-        cleanText.contains('pepper')) {
-      matchedCardId = 'ALAJO-001';
-      matchedName = 'Iya Alata';
-    } else if (cleanText.contains('baba ibadan') ||
-        cleanText.contains('ibadan') ||
-        cleanText.contains('tailor')) {
-      matchedCardId = 'ALAJO-002';
-      matchedName = 'Baba Ibadan';
-    } else if (cleanText.contains('mama ngozi') ||
-        cleanText.contains('ngozi') ||
-        cleanText.contains('provision')) {
-      matchedCardId = 'ALAJO-003';
-      matchedName = 'Mama Ngozi';
-    }
-
-    // Parse values from Yoruba / Pidgin / English terms
-    if (cleanText.contains('five thousand') ||
-        cleanText.contains('five k') ||
-        cleanText.contains('5k') ||
-        cleanText.contains('5000') ||
-        cleanText.contains('egberun marun')) {
-      amount = 5000;
-    } else if (cleanText.contains('two thousand') ||
-        cleanText.contains('two k') ||
-        cleanText.contains('2k') ||
-        cleanText.contains('2000') ||
-        cleanText.contains('egberun meji')) {
-      amount = 2000;
-    } else if (cleanText.contains('one thousand') ||
-        cleanText.contains('one k') ||
-        cleanText.contains('1k') ||
-        cleanText.contains('1000') ||
-        cleanText.contains('egberun') ||
-        cleanText.contains('okan')) {
-      amount = 1000;
-    }
-
-    if (cleanText.contains('collect') ||
-        cleanText.contains('pay') ||
-        cleanText.contains('gba') ||
-        cleanText.contains('san')) {
-      notes = "Voice: Collected Ajo";
-    }
-
-    if (matchedCardId != null) {
-      await DatabaseHelper.instance.addCollection(matchedCardId, amount, notes);
-      _showSuccessDialog(
-          "Success! Captured Voice payment of ${currencyFormat.format(amount)} for $matchedName.");
-      setState(() {
-        _speechText =
-            "Success: Collected ${currencyFormat.format(amount)} from $matchedName";
-      });
-    } else {
-      _showErrorDialog(
-          "Could not identify customer. Say 'Collect 1000 for Iya Alata', 'Collect two k for Baba Ibadan' or 'Mama Ngozi pay 5000'.");
-    }
-  }
-
-  void _showSuccessDialog(String msg) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.green, size: 28),
-            SizedBox(width: 10),
-            Text('Collection Recorded'),
-          ],
-        ),
-        content: Text(msg),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('O dabo / Done'),
-          )
-        ],
-      ),
-    );
-  }
-
-  void _showErrorDialog(String msg) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
-            SizedBox(width: 10),
-            Text('Voice Not Understood'),
-          ],
-        ),
-        content: Text(msg),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Try Again'),
-          )
-        ],
-      ),
-    );
   }
 
   @override
@@ -491,11 +368,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(Icons.savings_rounded, color: Colors.amber, size: 28),
             SizedBox(width: 10),
-            Text(
-              'Alajo OS',
-              style:
-                  TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-            ),
+            Text('Alajo OS', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
           ],
         ),
         backgroundColor: Theme.of(context).primaryColor,
@@ -513,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Voice Instruction Banner
+              // Voice Input Card - UPDATED
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Card(
@@ -527,40 +400,20 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             const Row(
                               children: [
-                                Icon(Icons.record_voice_over_rounded,
-                                    color: Color(0xFF0F5132)),
+                                Icon(Icons.record_voice_over_rounded, color: Color(0xFF0F5132)),
                                 SizedBox(width: 8),
-                                Text(
-                                  'Voice Input (Pidgin/Yoruba)',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16),
-                                ),
+                                Text('Voice Input', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                               ],
                             ),
-                            IconButton(
-                              onPressed: _isListening
-                                  ? _stopListening
-                                  : _startListening,
-                              icon: Icon(
-                                _isListening
-                                    ? Icons.mic_off_rounded
-                                    : Icons.mic_rounded,
-                                color: _isListening
-                                    ? Colors.red
-                                    : const Color(0xFF0F5132),
-                                size: 30,
-                              ),
-                            )
                           ],
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          _speechText,
+                          _isListening? "Listening... $_speechText" : _speechText,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontStyle: FontStyle.italic,
-                            color: _isListening ? Colors.red : Colors.grey[700],
+                            color: _isListening? Colors.red : Colors.grey[700],
                           ),
                         ),
                       ],
@@ -569,32 +422,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-              // THE 5 BIG BUTTONS CONTAINER
+              // THE 5 BIG BUTTONS
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Column(
                   children: [
-                    // Button 1: Scan Card
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0F5132),
                         foregroundColor: Colors.white,
                         minimumSize: const Size(double.infinity, 64),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         elevation: 4,
                       ),
                       icon: const Icon(Icons.qr_code_scanner_rounded, size: 28),
-                      label: const Text('SCAN CARD',
-                          style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.1)),
+                      label: const Text('SCAN CARD', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 1.1)),
                       onPressed: () => _openScanner(context),
                     ),
                     const SizedBox(height: 12),
-
-                    // Buttons 2 & 3: Find By Name, Dashboard
                     Row(
                       children: [
                         Expanded(
@@ -605,15 +450,12 @@ class _HomeScreenState extends State<HomeScreen> {
                               minimumSize: const Size(0, 60),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                side: const BorderSide(
-                                    color: Color(0xFF0F5132), width: 1.5),
+                                side: const BorderSide(color: Color(0xFF0F5132), width: 1.5),
                               ),
                               elevation: 2,
                             ),
                             icon: const Icon(Icons.search_rounded),
-                            label: const Text('FIND BY NAME',
-                                style: TextStyle(
-                                    fontSize: 13, fontWeight: FontWeight.bold)),
+                            label: const Text('FIND BY NAME', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                             onPressed: () => _findByName(context),
                           ),
                         ),
@@ -626,23 +468,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               minimumSize: const Size(0, 60),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                side: const BorderSide(
-                                    color: Color(0xFF0F5132), width: 1.5),
+                                side: const BorderSide(color: Color(0xFF0F5132), width: 1.5),
                               ),
                               elevation: 2,
                             ),
                             icon: const Icon(Icons.dashboard_rounded),
-                            label: const Text('DASHBOARD',
-                                style: TextStyle(
-                                    fontSize: 13, fontWeight: FontWeight.bold)),
+                            label: const Text('DASHBOARD', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                             onPressed: () => _showDashboard(context),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-
-                    // Buttons 4 & 5: Old Customers, Reset Demo
                     Row(
                       children: [
                         Expanded(
@@ -653,15 +490,12 @@ class _HomeScreenState extends State<HomeScreen> {
                               minimumSize: const Size(0, 60),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                side: const BorderSide(
-                                    color: Color(0xFF0F5132), width: 1.5),
+                                side: const BorderSide(color: Color(0xFF0F5132), width: 1.5),
                               ),
                               elevation: 2,
                             ),
                             icon: const Icon(Icons.group_rounded),
-                            label: const Text('OLD CUSTOMERS',
-                                style: TextStyle(
-                                    fontSize: 13, fontWeight: FontWeight.bold)),
+                            label: const Text('OLD CUSTOMERS', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                             onPressed: () => _viewOldCustomers(context),
                           ),
                         ),
@@ -669,18 +503,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         Expanded(
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(
-                                  0xFF842029), // Crimson background for Reset
+                              backgroundColor: const Color(0xFF842029),
                               foregroundColor: Colors.white,
                               minimumSize: const Size(0, 60),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               elevation: 2,
                             ),
                             icon: const Icon(Icons.refresh_rounded),
-                            label: const Text('RESET DEMO',
-                                style: TextStyle(
-                                    fontSize: 13, fontWeight: FontWeight.bold)),
+                            label: const Text('RESET DEMO', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                             onPressed: () => _resetDemo(context),
                           ),
                         ),
@@ -689,30 +519,19 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 24),
-
-              // DEMO QR CODES SECTION
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20.0),
                 child: Row(
                   children: [
                     Icon(Icons.qr_code_2_rounded, color: Color(0xFFD4AF37)),
                     SizedBox(width: 8),
-                    Text(
-                      '3 Test Savings Cards (QR Codes)',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: Color(0xFF0F5132)),
-                    ),
+                    Text('3 Test Savings Cards (QR Codes)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F5132))),
                   ],
                 ),
               ),
               const SizedBox(height: 12),
-
               _buildDemoQrSection(),
-
               const SizedBox(height: 40),
             ],
           ),
@@ -721,7 +540,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Helper widget to display the 3 QR cards of the demo clients on screen
   Widget _buildDemoQrSection() {
     final demoClients = [
       {'id': 'ALAJO-001', 'name': 'Iya Alata', 'desc': '₦1,000 / Day'},
@@ -738,44 +556,19 @@ class _HomeScreenState extends State<HomeScreen> {
             color: Colors.white,
             elevation: 3,
             shadowColor: Colors.black26,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(color: Color(0xFFE0E0E0)),
-            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE0E0E0))),
             child: Container(
               width: 140,
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  Text(
-                    client['name']!,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 13),
-                    textAlign: TextAlign.center,
-                  ),
+                  Text(client['name']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), textAlign: TextAlign.center),
                   const SizedBox(height: 6),
-                  QrImageView(
-                    data: client['id']!,
-                    version: QrVersions.auto,
-                    size: 90.0,
-                    gapless: false,
-                  ),
+                  QrImageView(data: client['id']!, version: QrVersions.auto, size: 90.0, gapless: false),
                   const SizedBox(height: 6),
-                  Text(
-                    client['id']!,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 11,
-                        color: Colors.blueGrey),
-                  ),
+                  Text(client['id']!, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11, color: Colors.blueGrey)),
                   const SizedBox(height: 2),
-                  Text(
-                    client['desc']!,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF0F5132),
-                        fontWeight: FontWeight.bold),
-                  ),
+                  Text(client['desc']!, style: const TextStyle(fontSize: 11, color: Color(0xFF0F5132), fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
@@ -786,7 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ============================================================================
-  // WORKFLOW: SCAN CARD (QR CODE SIMULATION & CAM SCREEN)
+  // UPDATED SCAN FLOW - CHECK IF USER EXISTS
   // ============================================================================
   void _openScanner(BuildContext context) {
     Navigator.of(context).push(
@@ -799,18 +592,16 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           body: Stack(
             children: [
-              // In mobile apps, uses actual camera
               MobileScanner(
                 onDetect: (capture) {
                   final List<Barcode> barcodes = capture.barcodes;
-                  if (barcodes.isNotEmpty && barcodes.first.rawValue != null) {
+                  if (barcodes.isNotEmpty && barcodes.first.rawValue!= null) {
                     final String cardId = barcodes.first.rawValue!;
                     Navigator.of(context).pop();
                     _handleScannedCard(cardId);
                   }
                 },
               ),
-              // Simulated overlay instructions
               Positioned.fill(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -825,50 +616,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 24),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       color: Colors.black54,
-                      child: const Text(
-                        'Align client QR Card inside box',
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
+                      child: const Text('Align client QR Card inside box', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     ),
-                    const SizedBox(height: 30),
-                    // Simulated QR scan options for developers in emulator
-                    const Text('OR SELECT FOR DEMO',
-                        style: TextStyle(
-                            color: Colors.white54,
-                            fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            _handleScannedCard('ALAJO-001');
-                          },
-                          child: const Text('Iya Alata'),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            _handleScannedCard('ALAJO-002');
-                          },
-                          child: const Text('Baba Ibadan'),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            _handleScannedCard('ALAJO-003');
-                          },
-                          child: const Text('Mama Ngozi'),
-                        ),
-                      ],
-                    )
                   ],
                 ),
               ),
@@ -881,77 +632,180 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _handleScannedCard(String cardId) async {
     final customer = await DatabaseHelper.instance.getCustomerByCardId(cardId);
+    
     if (customer == null) {
-      _showErrorDialog("Invalid card scanned: $cardId");
-      return;
+      // NO DATA FOUND - SHOW ADD USER SCREEN
+      _showAddUserScreen(cardId);
+    } else {
+      // USER EXISTS - SHOW PAYMENT SCREEN
+      _showPaymentScreen(customer);
     }
+  }
 
-    // Modal to add Ajo payment
-    int paymentAmount = customer.dailyAmount;
-    final textController =
-        TextEditingController(text: paymentAmount.toString());
-
+  // NEW: SHOW CARD INFO + AMOUNT INPUT
+  void _showPaymentScreen(Customer customer) {
+    final amountController = TextEditingController(text: customer.dailyAmount.toString());
+    
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(
           children: [
-            const Icon(Icons.qr_code_rounded, color: Color(0xFF0F5132)),
+            const Icon(Icons.person, color: Color(0xFF0F5132)),
             const SizedBox(width: 8),
-            Text('Card Scanned: ${customer.name}'),
+            Expanded(child: Text(customer.name, style: const TextStyle(fontSize: 16))),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Card Code: ${customer.cardId}',
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-            const SizedBox(height: 6),
-            Text('Current Balance: ${currencyFormat.format(customer.balance)}'),
-            Text(
-                'Expected Daily Contribution: ${currencyFormat.format(customer.dailyAmount)}'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: textController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Amount to Pay (₦)',
-                border: OutlineInputBorder(),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (customer.photoPath!= null)
+                CircleAvatar(
+                  radius: 40,
+                  backgroundImage: FileImage(File(customer.photoPath!)),
+                ),
+              const SizedBox(height: 12),
+              Text('Card ID: ${customer.cardId}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+              Text('Phone: ${customer.phone}'),
+              const SizedBox(height: 6),
+              Text('Current Balance: ${currencyFormat.format(customer.balance)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+              Text('Daily Target: ${currencyFormat.format(customer.dailyAmount)}'),
+              Text('Last Collection: ${customer.lastCollection}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: amountController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Amount Collected (₦)',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(_isListening? Icons.mic : Icons.mic_none, color: _isListening? Colors.red : const Color(0xFF0F5132)),
+                    onPressed: () => _isListening? _stopListening() : _startListening(amountController),
+                  ),
+                ),
               ),
-              onChanged: (val) {
-                paymentAmount = int.tryParse(val) ?? customer.dailyAmount;
-              },
-            ),
-          ],
+              const SizedBox(height: 8),
+              Text(_speechText, style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic)),
+            ],
+          ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0F5132),
-                foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F5132), foregroundColor: Colors.white),
             onPressed: () async {
-              Navigator.pop(ctx);
-              await DatabaseHelper.instance.addCollection(
-                  cardId, paymentAmount, 'QR Card Scanned Payment');
-              _showSuccessDialog(
-                  'Recorded payment of ${currencyFormat.format(paymentAmount)} for ${customer.name}. New Balance: ${currencyFormat.format(customer.balance + paymentAmount)}.');
+              int amount = int.tryParse(amountController.text)?? 0;
+              if (amount > 0) {
+                Navigator.pop(ctx);
+                await DatabaseHelper.instance.addCollection(customer.cardId, amount, 'Cash Collection');
+                _showSuccessDialog('Recorded ${currencyFormat.format(amount)} for ${customer.name}');
+              }
             },
-            child: const Text('Record Ajo'),
+            child: const Text('Save Payment'),
           ),
         ],
       ),
     );
   }
 
-  // ============================================================================
-  // WORKFLOW: FIND BY NAME
-  // ============================================================================
+  // NEW: ADD USER SCREEN
+  void _showAddUserScreen(String cardId) async {
+    final nameController = TextEditingController();
+    final phoneController = TextEditingController();
+    final dailyAmountController = TextEditingController(text: '1000');
+    String? photoPath;
+    final ImagePicker picker = ImagePicker();
+    String newId = await DatabaseHelper.instance.generateNewCardId();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.person_add, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('No Data - Add User'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('QR Code: $cardId', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                Text('New ID: $newId', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                // Photo picker
+                GestureDetector(
+                  onTap: () async {
+                    final XFile? image = await picker.pickImage(source: ImageSource.camera);
+                    if (image!= null) {
+                      setDialogState(() => photoPath = image.path);
+                    }
+                  },
+                  child: CircleAvatar(
+                    radius: 40,
+                    backgroundColor: Colors.grey[300],
+                    backgroundImage: photoPath!= null? FileImage(File(photoPath!)) : null,
+                    child: photoPath == null? const Icon(Icons.camera_alt, size: 40, color: Colors.grey) : null,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text('Tap to take photo', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(labelText: 'Full Name', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'Phone Number', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: dailyAmountController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Daily Amount (₦)', border: OutlineInputBorder()),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F5132), foregroundColor: Colors.white),
+              onPressed: () async {
+                if (nameController.text.isEmpty || phoneController.text.isEmpty) {
+                  _showErrorDialog('Name and Phone are required');
+                  return;
+                }
+                Navigator.pop(ctx);
+                final newCustomer = Customer(
+                  cardId: newId,
+                  name: nameController.text,
+                  phone: phoneController.text,
+                  dailyAmount: int.tryParse(dailyAmountController.text)?? 1000,
+                  balance: 0,
+                  lastCollection: 'Never',
+                  photoPath: photoPath,
+                );
+                await DatabaseHelper.instance.addCustomer(newCustomer);
+                _showSuccessDialog('Added ${newCustomer.name} with ID $newId');
+                // Open payment screen immediately
+                _showPaymentScreen(newCustomer);
+              },
+              child: const Text('Save User'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _findByName(BuildContext context) async {
     final customers = await DatabaseHelper.instance.getCustomers();
     String searchQuery = "";
@@ -961,10 +815,7 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final filtered = customers
-                .where((c) =>
-                    c.name.toLowerCase().contains(searchQuery.toLowerCase()))
-                .toList();
+            final filtered = customers.where((c) => c.name.toLowerCase().contains(searchQuery.toLowerCase())).toList();
             return AlertDialog(
               title: const Row(
                 children: [
@@ -980,42 +831,33 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     TextField(
                       decoration: const InputDecoration(
-                        hintText: 'Enter name (e.g. Iya, Mama, Tailor)',
+                        hintText: 'Enter name',
                         prefixIcon: Icon(Icons.search),
                         border: OutlineInputBorder(),
                       ),
-                      onChanged: (val) {
-                        setModalState(() {
-                          searchQuery = val;
-                        });
-                      },
+                      onChanged: (val) => setModalState(() => searchQuery = val),
                     ),
                     const SizedBox(height: 12),
                     Expanded(
                       child: filtered.isEmpty
-                          ? const Center(child: Text('No customers found'))
+                         ? const Center(child: Text('No customers found'))
                           : ListView.builder(
                               shrinkWrap: true,
                               itemCount: filtered.length,
                               itemBuilder: (context, index) {
                                 final c = filtered[index];
                                 return ListTile(
-                                  leading: const CircleAvatar(
-                                    backgroundColor: Color(0xFF0F5132),
-                                    foregroundColor: Colors.white,
-                                    child: Icon(Icons.person),
+                                  leading: CircleAvatar(
+                                    backgroundColor: const Color(0xFF0F5132),
+                                    backgroundImage: c.photoPath!= null? FileImage(File(c.photoPath!)) : null,
+                                    child: c.photoPath == null? const Icon(Icons.person, color: Colors.white) : null,
                                   ),
-                                  title: Text(c.name,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold)),
-                                  subtitle: Text(
-                                      '${c.cardId} • Targets ${currencyFormat.format(c.dailyAmount)}/day'),
-                                  trailing: const Icon(
-                                      Icons.arrow_forward_ios_rounded,
-                                      size: 16),
+                                  title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  subtitle: Text('${c.cardId} • ${currencyFormat.format(c.dailyAmount)}/day'),
+                                  trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                                   onTap: () {
                                     Navigator.pop(ctx);
-                                    _handleScannedCard(c.cardId);
+                                    _showPaymentScreen(c);
                                   },
                                 );
                               },
@@ -1031,33 +873,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ============================================================================
-  // WORKFLOW: DASHBOARD OVERVIEW
-  // ============================================================================
   void _showDashboard(BuildContext context) async {
     final customers = await DatabaseHelper.instance.getCustomers();
     final contributions = await DatabaseHelper.instance.getContributions();
-
-    int totalSavings = 0;
-    for (var c in customers) {
-      totalSavings += c.balance;
-    }
-
-    int todayCollections = 0;
-    // Simple filter of contributions created today or labeled "Just now" / "Voice"
-    for (var con in contributions) {
-      if (con.datePaid
-              .contains(DateFormat('yyyy-MM-dd').format(DateTime.now())) ||
-          con.notes.contains('Voice') ||
-          con.notes.contains('QR')) {
-        todayCollections += con.amountPaid;
-      }
-    }
+    int totalSavings = customers.fold(0, (sum, c) => sum + c.balance);
+    int todayCollections = contributions.where((con) => con.datePaid.contains(DateFormat('yyyy-MM-dd').format(DateTime.now()))).fold(0, (sum, c) => sum + c.amountPaid);
 
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => Container(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -1066,14 +890,9 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const Row(
               children: [
-                Icon(Icons.dashboard_rounded,
-                    color: Color(0xFF0F5132), size: 28),
+                Icon(Icons.dashboard_rounded, color: Color(0xFF0F5132), size: 28),
                 SizedBox(width: 8),
-                Text('DAILY LEDGER SUMMARY',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                        letterSpacing: 1)),
+                Text('DAILY LEDGER SUMMARY', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 1)),
               ],
             ),
             const Divider(height: 24),
@@ -1086,17 +905,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
                         children: [
-                          const Text('Today\'s Collection',
-                              style: TextStyle(
-                                  fontSize: 12, color: Color(0xFF0F5132))),
+                          const Text('Today\'s Collection', style: TextStyle(fontSize: 12, color: Color(0xFF0F5132))),
                           const SizedBox(height: 6),
-                          Text(
-                            currencyFormat.format(todayCollections),
-                            style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF0F5132)),
-                          ),
+                          Text(currencyFormat.format(todayCollections), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F5132))),
                         ],
                       ),
                     ),
@@ -1109,17 +920,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
                         children: [
-                          const Text('Grand Total Saved',
-                              style: TextStyle(
-                                  fontSize: 12, color: Color(0xFF856404))),
+                          const Text('Grand Total Saved', style: TextStyle(fontSize: 12, color: Color(0xFF856404))),
                           const SizedBox(height: 6),
-                          Text(
-                            currencyFormat.format(totalSavings),
-                            style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF856404)),
-                          ),
+                          Text(currencyFormat.format(totalSavings), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF856404))),
                         ],
                       ),
                     ),
@@ -1129,182 +932,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 12),
             ListTile(
-              leading: const Icon(Icons.people_alt_rounded,
-                  color: Color(0xFF0F5132)),
+              leading: const Icon(Icons.people_alt_rounded, color: Color(0xFF0F5132)),
               title: const Text('Registered Thrift Members'),
-              trailing: Text('${customers.length} Accounts',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.history_edu_rounded,
-                  color: Color(0xFF0F5132)),
-              title: const Text('Total Contributions Ever Logged'),
-              trailing: Text('${contributions.length} Deposits',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F5132),
-                  foregroundColor: Colors.white),
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Back to Home'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================================
-  // WORKFLOW: VIEW OLD CUSTOMERS & HISTORY
-  // ============================================================================
-  void _viewOldCustomers(BuildContext context) async {
-    final customers = await DatabaseHelper.instance.getCustomers();
-    final contributions = await DatabaseHelper.instance.getContributions();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.badge_rounded, color: Color(0xFF0F5132)),
-            SizedBox(width: 8),
-            Text('Old Customers & Ledgers'),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: DefaultTabController(
-            length: 2,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const TabBar(
-                  labelColor: Color(0xFF0F5132),
-                  indicatorColor: Color(0xFF0F5132),
-                  tabs: [
-                    Tab(text: "Customers List"),
-                    Tab(text: "Ledger History"),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 350,
-                  child: TabBarView(
-                    children: [
-                      // TAB 1: CUSTOMERS LIST
-                      ListView.builder(
-                        itemCount: customers.length,
-                        itemBuilder: (context, i) {
-                          final c = customers[i];
-                          return Card(
-                            color: Colors.white,
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            child: ListTile(
-                              title: Text(c.name,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold)),
-                              subtitle:
-                                  Text('ID: ${c.cardId} • Phone: ${c.phone}'),
-                              trailing: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text(currencyFormat.format(c.balance),
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.green)),
-                                  Text('L/C: ${c.lastCollection}',
-                                      style: const TextStyle(
-                                          fontSize: 10, color: Colors.grey)),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      // TAB 2: LEDGER HISTORY
-                      ListView.builder(
-                        itemCount: contributions.length,
-                        itemBuilder: (context, i) {
-                          final h = contributions[i];
-                          return Card(
-                            color: Colors.white,
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            child: ListTile(
-                              leading: const CircleAvatar(
-                                backgroundColor: Color(0xFFD4AF37),
-                                child: Icon(Icons.arrow_downward_rounded,
-                                    color: Colors.white),
-                              ),
-                              title: Text(h.customerName,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13)),
-                              subtitle: Text('${h.notes}\n${h.datePaid}',
-                                  style: const TextStyle(fontSize: 11)),
-                              trailing: Text(
-                                  currencyFormat.format(h.amountPaid),
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.green)),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================================
-  // WORKFLOW: RESET DEMO DATABASE
-  // ============================================================================
-  void _resetDemo(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirm Demo Reset?'),
-        content: const Text(
-            'This will drop tables and reload standard customers (Iya Alata, Baba Ibadan, Mama Ngozi) with baseline balances and fresh records.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF842029),
-                foregroundColor: Colors.white),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await DatabaseHelper.instance.resetDemoDatabase();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Demo Database Reloaded successfully!')),
-              );
-              setState(() {
-                _speechText =
-                    "Tap mic and say 'Collect [amount] for [Customer]'";
-              });
-            },
-            child: const Text('Yes, Reload'),
-          ),
-        ],
-      ),
-    );
-  }
-}
+              trailing: Text('${customers.length} Accounts', style: const
