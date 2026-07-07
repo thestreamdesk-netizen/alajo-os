@@ -971,3 +971,219 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  void _findByName(BuildContext context) async {
+    final customers = await DatabaseHelper.instance.getCustomers();
+    String searchQuery = "";
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final filtered = customers.where((c) => c.name.toLowerCase().contains(searchQuery.toLowerCase())).toList();
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.search_rounded, color: Color(0xFF0F5132)),
+                  SizedBox(width: 8),
+                  Text('Search Alajo Clients'),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'Enter name',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (val) => setModalState(() => searchQuery = val),
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: filtered.isEmpty
+                    ? const Center(child: Text('No customers found'))
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: filtered.length,
+                              itemBuilder: (context, index) {
+                                final c = filtered[index];
+                                return ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: const Color(0xFF0F5132),
+                                    backgroundImage: c.photoPath!= null? FileImage(File(c.photoPath!)) : null,
+                                    child: c.photoPath == null? const Icon(Icons.person, color: Colors.white) : null,
+                                  ),
+                                  title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  subtitle: Text('${c.cardId} • ${currencyFormat.format(c.dailyAmount)}/day'),
+                                  trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                                  onTap: () {
+                                    Navigator.pop(ctx);
+                                    _showPaymentScreen(c);
+                                  },
+                                );
+                              },
+                            ),
+                    )
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showDashboard(BuildContext context) async {
+    final customers = await DatabaseHelper.instance.getCustomers();
+    final contributions = await DatabaseHelper.instance.getContributions();
+    int totalSavings = customers.fold(0, (sum, c) => sum + c.balance);
+    int todayCollections = contributions.where((con) => con.datePaid.contains(DateFormat('yyyy-MM-dd').format(DateTime.now()))).fold(0, (sum, c) => sum + c.amountPaid);
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.dashboard_rounded, color: Color(0xFF0F5132), size: 28),
+                SizedBox(width: 8),
+                Text('DAILY LEDGER SUMMARY', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 1)),
+              ],
+            ),
+            const Divider(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: Card(
+                    color: const Color(0xFFE8F0EA),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          const Text('Today\'s Collection', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          Text(currencyFormat.format(todayCollections), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F5132))),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Card(
+                    color: const Color(0xFFFFF8E1),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          const Text('Total Savings', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          Text(currencyFormat.format(totalSavings), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F5132))),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text('Total Customers: ${customers.length}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text('Total Contributions: ${contributions.length}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F5132), foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _viewOldCustomers(BuildContext context) async {
+    final customers = await DatabaseHelper.instance.getCustomers();
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.group_rounded, color: Color(0xFF0F5132)),
+            SizedBox(width: 8),
+            Text('All Customers'),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: customers.isEmpty
+           ? const Center(child: Text('No customers yet'))
+              : ListView.builder(
+                  itemCount: customers.length,
+                  itemBuilder: (context, index) {
+                    final c = customers[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: const Color(0xFF0F5132),
+                        backgroundImage: c.photoPath!= null? FileImage(File(c.photoPath!)) : null,
+                        child: c.photoPath == null? const Icon(Icons.person, color: Colors.white) : null,
+                      ),
+                      title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text('${c.cardId} • Balance: ${currencyFormat.format(c.balance)}'),
+                      trailing: Text('${currencyFormat.format(c.dailyAmount)}/day', style: const TextStyle(fontSize: 11)),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _showPaymentScreen(c);
+                      },
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  void _resetDemo(BuildContext context) async {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            SizedBox(width: 10),
+            Text('Reset Demo Data?'),
+          ],
+        ),
+        content: const Text('This will delete all customers and contributions, and restore the 3 demo customers. Are you sure?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await DatabaseHelper.instance.resetDemoDatabase();
+              _showSuccessDialog('Demo data reset! 3 test customers restored.');
+            },
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+}
