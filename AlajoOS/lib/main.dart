@@ -40,9 +40,6 @@ class AlajoOsApp extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// DATABASE HELPER - UPDATED WITH PHOTO
-// ============================================================================
 class Customer {
   final String cardId;
   final String name;
@@ -201,7 +198,7 @@ class DatabaseHelper {
     final db = await instance.database;
     final result = await db.query('customers');
     return result
-     .map((json) => Customer(
+    .map((json) => Customer(
               cardId: json['cardId'] as String,
               name: json['name'] as String,
               phone: json['phone'] as String,
@@ -210,7 +207,7 @@ class DatabaseHelper {
               lastCollection: json['lastCollection'] as String,
               photoPath: json['photoPath'] as String?,
             ))
-     .toList();
+    .toList();
   }
 
   Future<Customer?> getCustomerByCardId(String cardId) async {
@@ -281,7 +278,7 @@ class DatabaseHelper {
     final db = await instance.database;
     final result = await db.query('contributions', orderBy: 'id DESC');
     return result
-     .map((json) => Contribution(
+    .map((json) => Contribution(
               id: json['id'] as int?,
               customerCardId: json['customerCardId'] as String,
               customerName: json['customerName'] as String,
@@ -289,7 +286,7 @@ class DatabaseHelper {
               datePaid: json['datePaid'] as String,
               notes: json['notes'] as String,
             ))
-     .toList();
+    .toList();
   }
 
   Future<void> resetDemoDatabase() async {
@@ -300,9 +297,6 @@ class DatabaseHelper {
   }
 }
 
-// ============================================================================
-// HOME SCREEN
-// ============================================================================
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -866,7 +860,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 12),
                     Expanded(
                       child: filtered.isEmpty
-                       ? const Center(child: Text('No customers found'))
+                      ? const Center(child: Text('No customers found'))
                           : ListView.builder(
                               shrinkWrap: true,
                               itemCount: filtered.length,
@@ -930,3 +924,23 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Column(
+                        children: [
+                          const Text('Today\'s Collection', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          Text(currencyFormat.format(todayCollections), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F5132))),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Card(
+                    color: const Color(0xFFFFF8E1),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          const Text('Total Savings', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          Text(currencyFormat.format(totalSavings),
