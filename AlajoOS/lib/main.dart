@@ -27,7 +27,7 @@ class AlajoOsApp extends StatelessWidget {
           secondary: const Color(0xFFD4AF37), // Metallic Gold
           background: const Color(0xFFF8F9FA),
         ),
-        cardTheme: const CardTheme(
+        cardTheme: const CardThemeData(
           elevation: 2,
           margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
         ),
