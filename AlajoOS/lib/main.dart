@@ -33,16 +33,12 @@ class AlajoOsApp extends StatelessWidget {
           elevation: 2,
           margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
         ),
-        fontFamily: 'sans-serif',
       ),
       home: const HomeScreen(),
     );
   }
 }
 
-// ============================================================================
-// DATABASE HELPER - UPDATED WITH PHOTO
-// ============================================================================
 class Customer {
   final String cardId;
   final String name;
@@ -201,7 +197,7 @@ class DatabaseHelper {
     final db = await instance.database;
     final result = await db.query('customers');
     return result
-      .map((json) => Customer(
+       .map((json) => Customer(
               cardId: json['cardId'] as String,
               name: json['name'] as String,
               phone: json['phone'] as String,
@@ -210,7 +206,7 @@ class DatabaseHelper {
               lastCollection: json['lastCollection'] as String,
               photoPath: json['photoPath'] as String?,
             ))
-      .toList();
+       .toList();
   }
 
   Future<Customer?> getCustomerByCardId(String cardId) async {
@@ -281,7 +277,7 @@ class DatabaseHelper {
     final db = await instance.database;
     final result = await db.query('contributions', orderBy: 'id DESC');
     return result
-      .map((json) => Contribution(
+       .map((json) => Contribution(
               id: json['id'] as int?,
               customerCardId: json['customerCardId'] as String,
               customerName: json['customerName'] as String,
@@ -289,7 +285,7 @@ class DatabaseHelper {
               datePaid: json['datePaid'] as String,
               notes: json['notes'] as String,
             ))
-      .toList();
+       .toList();
   }
 
   Future<void> resetDemoDatabase() async {
@@ -300,9 +296,6 @@ class DatabaseHelper {
   }
 }
 
-// ============================================================================
-// HOME SCREEN
-// ============================================================================
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -359,7 +352,6 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isListening = false);
   }
 
-  // FIX: ADD THESE 2 MISSING FUNCTIONS
   void _showSuccessDialog(String msg) {
     showDialog(
       context: context,
@@ -598,4 +590,338 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  Text(client['name']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), textAlign: TextAlign
+                  Text(client['name']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), textAlign: TextAlign.center),
+                  const SizedBox(height: 6),
+                  QrImageView(data: client['id']!, version: QrVersions.auto, size: 90.0, gapless: false),
+                  const SizedBox(height: 6),
+                  Text(client['id']!, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11, color: Colors.blueGrey)),
+                  const SizedBox(height: 2),
+                  Text(client['desc']!, style: const TextStyle(fontSize: 11, color: Color(0xFF0F5132), fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  void _openScanner(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          appBar: AppBar(
+            title: const Text('Scan Savings Card QR'),
+            backgroundColor: const Color(0xFF0F5132),
+            foregroundColor: Colors.white,
+          ),
+          body: Stack(
+            children: [
+              MobileScanner(
+                onDetect: (capture) {
+                  final List<Barcode> barcodes = capture.barcodes;
+                  if (barcodes.isNotEmpty && barcodes.first.rawValue!= null) {
+                    final String cardId = barcodes.first.rawValue!;
+                    Navigator.of(context).pop();
+                    _handleScannedCard(cardId);
+                  }
+                },
+              ),
+              Positioned.fill(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 250,
+                      height: 250,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.amber, width: 4),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      color: Colors.black54,
+                      child: const Text('Align client QR Card inside box', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _handleScannedCard(String cardId) async {
+    final customer = await DatabaseHelper.instance.getCustomerByCardId(cardId);
+    
+    if (customer == null) {
+      _showAddUserScreen(cardId);
+    } else {
+      _showPaymentScreen(customer);
+    }
+  }
+
+  void _showPaymentScreen(Customer customer) {
+    final amountController = TextEditingController(text: customer.dailyAmount.toString());
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.person, color: Color(0xFF0F5132)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(customer.name, style: const TextStyle(fontSize: 16))),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (customer.photoPath!= null)
+                CircleAvatar(
+                  radius: 40,
+                  backgroundImage: FileImage(File(customer.photoPath!)),
+                ),
+              const SizedBox(height: 12),
+              Text('Card ID: ${customer.cardId}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+              Text('Phone: ${customer.phone}'),
+              const SizedBox(height: 6),
+              Text('Current Balance: ${currencyFormat.format(customer.balance)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+              Text('Daily Target: ${currencyFormat.format(customer.dailyAmount)}'),
+              Text('Last Collection: ${customer.lastCollection}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: amountController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Amount Collected (₦)',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(_isListening? Icons.mic : Icons.mic_none, color: _isListening? Colors.red : const Color(0xFF0F5132)),
+                    onPressed: () => _isListening? _stopListening() : _startListening(amountController),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(_speechText, style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F5132), foregroundColor: Colors.white),
+            onPressed: () async {
+              int amount = int.tryParse(amountController.text)?? 0;
+              if (amount > 0) {
+                Navigator.pop(ctx);
+                await DatabaseHelper.instance.addCollection(customer.cardId, amount, 'Cash Collection');
+                _showSuccessDialog('Recorded ${currencyFormat.format(amount)} for ${customer.name}');
+              }
+            },
+            child: const Text('Save Payment'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddUserScreen(String cardId) async {
+    final nameController = TextEditingController();
+    final phoneController = TextEditingController();
+    final dailyAmountController = TextEditingController(text: '1000');
+    String? photoPath;
+    final ImagePicker picker = ImagePicker();
+    String newId = await DatabaseHelper.instance.generateNewCardId();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.person_add, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('No Data - Add User'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('QR Code: $cardId', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                Text('New ID: $newId', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: () async {
+                    final XFile? image = await picker.pickImage(source: ImageSource.camera);
+                    if (image!= null) {
+                      setDialogState(() => photoPath = image.path);
+                    }
+                  },
+                  child: CircleAvatar(
+                    radius: 40,
+                    backgroundColor: Colors.grey[300],
+                    backgroundImage: photoPath!= null? FileImage(File(photoPath!)) : null,
+                    child: photoPath == null? const Icon(Icons.camera_alt, size: 40, color: Colors.grey) : null,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text('Tap to take photo', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(labelText: 'Full Name', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'Phone Number', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: dailyAmountController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Daily Amount (₦)', border: OutlineInputBorder()),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F5132), foregroundColor: Colors.white),
+              onPressed: () async {
+                if (nameController.text.isEmpty || phoneController.text.isEmpty) {
+                  _showErrorDialog('Name and Phone are required');
+                  return;
+                }
+                Navigator.pop(ctx);
+                final newCustomer = Customer(
+                  cardId: newId,
+                  name: nameController.text,
+                  phone: phoneController.text,
+                  dailyAmount: int.tryParse(dailyAmountController.text)?? 1000,
+                  balance: 0,
+                  lastCollection: 'Never',
+                  photoPath: photoPath,
+                );
+                await DatabaseHelper.instance.addCustomer(newCustomer);
+                _showSuccessDialog('Added ${newCustomer.name} with ID $newId');
+                _showPaymentScreen(newCustomer);
+              },
+              child: const Text('Save User'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _findByName(BuildContext context) async {
+    final customers = await DatabaseHelper.instance.getCustomers();
+    String searchQuery = "";
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final filtered = customers.where((c) => c.name.toLowerCase().contains(searchQuery.toLowerCase())).toList();
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.search_rounded, color: Color(0xFF0F5132)),
+                  SizedBox(width: 8),
+                  Text('Search Alajo Clients'),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'Enter name',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (val) => setModalState(() => searchQuery = val),
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: filtered.isEmpty
+                         ? const Center(child: Text('No customers found'))
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: filtered.length,
+                              itemBuilder: (context, index) {
+                                final c = filtered[index];
+                                return ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: const Color(0xFF0F5132),
+                                    backgroundImage: c.photoPath!= null? FileImage(File(c.photoPath!)) : null,
+                                    child: c.photoPath == null? const Icon(Icons.person, color: Colors.white) : null,
+                                  ),
+                                  title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  subtitle: Text('${c.cardId} • ${currencyFormat.format(c.dailyAmount)}/day'),
+                                  trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                                  onTap: () {
+                                    Navigator.pop(ctx);
+                                    _showPaymentScreen(c);
+                                  },
+                                );
+                              },
+                            ),
+                    )
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showDashboard(BuildContext context) async {
+    final customers = await DatabaseHelper.instance.getCustomers();
+    final contributions = await DatabaseHelper.instance.getContributions();
+    int totalSavings = customers.fold(0, (sum, c) => sum + c.balance);
+    int todayCollections = contributions.where((con) => con.datePaid.contains(DateFormat('yyyy-MM-dd').format(DateTime.now()))).fold(0, (sum, c) => sum + c.amountPaid);
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.dashboard_rounded, color: Color(0xFF0F5132), size: 28),
+                SizedBox(width: 8),
+                Text('DAILY LEDGER SUMMARY', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 1)),
+              ],
+            ),
+            const Divider(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: Card(
+                    color: const Color(0xFFE8F0EA),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          const Text('Today\'s Collection', style: TextStyle(fontSize: 12
