@@ -9,7 +9,6 @@ android {
     namespace = "com.example.alajoos"
     compileSdk = 34
     ndkVersion = "27.0.12077973"
-    defaultConfig {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -18,8 +17,7 @@ android {
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
-
-    defaultConfig {
+        defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.alajoos"
         // You can update the following values to match your application needs.
